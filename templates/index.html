@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-    <p class="center">
-      Welcome to the main page
-    </p>
+<form id='analysis_input'>
+    <b>Enter the username of the Twitter user you wish to analyze</b><br>
+    <input id='username' type='text' placeholder='Username'><br>
+    <input name='method' type='radio' value='first' checked> First<br>
+    <input name='method' type='radio' value='second'> Second<br>
+    <input name='method' type='radio' value='third'> Third<br><br>
+    <input id='analyze_submit' type='button' value='Analyze' onclick='analyze()'>
+</form>
+<div id='analysis'></div>
 {% endblock %}
