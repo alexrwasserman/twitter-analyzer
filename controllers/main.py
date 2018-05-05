@@ -1,5 +1,4 @@
 from flask import *
-from http_codes import *
 
 main = Blueprint('main', __name__, template_folder='templates')
 
