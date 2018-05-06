@@ -19,12 +19,13 @@ def analyze():
     params = request.args
 
     error = check_inputs(params)
-
     if error:
         return error
 
     username = params['username']
     method = params['method']
+
+    create_tweets_dir()
 
     s3 = boto3.Session(
         aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
@@ -32,14 +33,15 @@ def analyze():
     ).resource('s3')
 
     bucket_name = 'ta-cached-tweets'
-    filename = username + '-tweets.txt'
-    must_create_file = False
+    s3_key = username + '-tweets.txt'
+    local_filename = 'tweets/' + s3_key
 
     try:
-        s3.Bucket(bucket_name).download_file(filename, filename)
+        s3.Bucket(bucket_name).download_file(s3_key, local_filename)
+        user_has_cached_tweets = True
     except botocore.exceptions.ClientError as e:
         if e.response['Error']['Code'] == '404':
-            must_create_file = True
+            user_has_cached_tweets = False
         else:
             error = str(e)
     except Exception as e:
@@ -48,11 +50,12 @@ def analyze():
     if error:
         return error
 
-    update_tweets_file(username, filename, must_create_file)
+    new_tweets = update_tweets_file(username, local_filename, user_has_cached_tweets)
+
+    if new_tweets:
+        s3.meta.client.upload_file(local_filename, bucket_name, s3_key)
 
     # TODO: this is where the analysis should be done
-
-    s3.meta.client.upload_file(filename, bucket_name, filename)
 
     return 'done'
 
@@ -76,8 +79,7 @@ def check_inputs(params):
 # id
 # created at (seconds since epoch)
 # tokenized text
-def update_tweets_file(username, filename, must_create_file):
-    # TODO: Decide if sleeping once the limit is reached is the desired behavior
+def update_tweets_file(username, filename, user_has_cached_tweets):
     api = twitter.Api(
         consumer_key=os.environ['TWITTER_CONSUMER_KEY'],
         consumer_secret=os.environ['TWITTER_CONSUMER_SECRET'],
@@ -87,42 +89,49 @@ def update_tweets_file(username, filename, must_create_file):
         sleep_on_rate_limit=True
     )
 
-    if must_create_file:
-        create_new_tweets_file(api, username, filename)
+    if user_has_cached_tweets:
+        with open(filename, 'r') as f:
+            last_cached_tweet = int(f.readlines()[-3])
     else:
-        add_recents_to_tweets_file(api, username, filename)
+        last_cached_tweet = None
 
-
-def create_new_tweets_file(api, username, filename):
     tweets = []
 
-    # Get 200 most recent tweets
+    # Get most recent tweets
     newest_batch = api.GetUserTimeline(
         screen_name=username,
         count=TWEETS_PER_REQUEST_LIMIT,
-        trim_user=True
+        trim_user=True,
+        since_id=last_cached_tweet
     )
     tweets = tweets + newest_batch
 
     while len(newest_batch) == TWEETS_PER_REQUEST_LIMIT:
         # user most likely has more tweets to fetch
-        oldest_id = sorted(newest_batch, key=operator.attrgetter('created_at_in_seconds'))[0].id
+        oldest_fetched_tweet = sorted(newest_batch, key=operator.attrgetter('created_at_in_seconds'))[0].id
         newest_batch = api.GetUserTimeline(
             screen_name=username,
             count=TWEETS_PER_REQUEST_LIMIT,
             trim_user=True,
-            max_id=oldest_id)
-        tweets = tweets + newest_batch
+            since_id=last_cached_tweet,
+            max_id=oldest_fetched_tweet
+        )
 
-    tweets.sort(key=operator.attrgetter('created_at_in_seconds'), reverse=True)
+        # Must delete duplicate tweet whose id == oldest_tweet_fetched
+        tweets = tweets + [tweet for tweet in newest_batch if tweet.id != oldest_fetched_tweet]
 
-    with open(filename, 'w') as f:
+    tweets.sort(key=operator.attrgetter('created_at_in_seconds'))
+
+    with open(filename, 'a') as f:
         for tweet in tweets:
             f.write(str(tweet.id) + '\n')
             f.write(str(tweet.created_at_in_seconds) + '\n')
             # TODO: preprocess and tokenize text
-            f.write(tweet.full_text + '\n')
+            f.write(tweet.full_text.replace('\n', ' ') + '\n')
+
+    return len(tweets)
 
 
-def add_recents_to_tweets_file(api, username, filename):
-    pass
+def create_tweets_dir():
+    if not os.path.exists('tweets'):
+        os.makedirs('tweets')
