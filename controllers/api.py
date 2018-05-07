@@ -1,15 +1,16 @@
 import os
 import re
 import operator
+from enum import Enum
 
 import boto3
 import botocore
 import twitter
 from flask import *
 
-PERMITTED_ANALYSES = [
-    'homemade'
-]
+class Analysis(Enum):
+    HOMEMADE = 1
+
 TWEETS_PER_REQUEST_LIMIT = 200
 
 api = Blueprint('api', __name__, template_folder='templates')
@@ -20,12 +21,10 @@ def analyze():
 
     error = check_inputs(params)
     if error:
-        return error
+        return error, 400
 
     username = params['username']
     method = params['method']
-
-    create_tweets_dir()
 
     s3 = boto3.Session(
         aws_access_key_id=os.environ['AWS_ACCESS_KEY_ID'],
@@ -48,7 +47,7 @@ def analyze():
         error = str(e)
 
     if error:
-        return error
+        return error, 500
 
     new_tweets = update_tweets_file(username, local_filename, user_has_cached_tweets)
 
@@ -68,17 +67,15 @@ def check_inputs(params):
     elif 'username' not in params and 'method' not in params:
         return 'Missing the required "username" and "method" parameters'
 
-    if params['method'] not in PERMITTED_ANALYSES:
+    try:
+        Analysis(int(params['method']))
+    except ValueError as e:
         return params['method'] + ' is not a recognized method'
 
     if not re.search('^(\w){1,15}$', params['username']) or re.search('Twitter|Admin', params['username']):
         return params['username'] + ' is not a valid Twitter username'
 
 
-# Each tweet in tweets file will be of the format:
-# id
-# created at (seconds since epoch)
-# tokenized text
 def update_tweets_file(username, filename, user_has_cached_tweets):
     api = twitter.Api(
         consumer_key=os.environ['TWITTER_CONSUMER_KEY'],
@@ -130,8 +127,3 @@ def update_tweets_file(username, filename, user_has_cached_tweets):
             f.write(tweet.full_text.replace('\n', ' ') + '\n')
 
     return len(tweets)
-
-
-def create_tweets_dir():
-    if not os.path.exists('tweets'):
-        os.makedirs('tweets')
