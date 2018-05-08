@@ -1,12 +1,16 @@
+from enum import Enum
+import operator
 import os
 import re
-import operator
-from enum import Enum
+import string
 
 import boto3
 import botocore
-import twitter
+import emoji
 from flask import *
+from nltk.corpus import stopwords
+from nltk.tokenize import TweetTokenizer
+import twitter
 
 class Analysis(Enum):
     HOMEMADE = 1
@@ -42,12 +46,7 @@ def analyze():
         if e.response['Error']['Code'] == '404':
             user_has_cached_tweets = False
         else:
-            error = str(e)
-    except Exception as e:
-        error = str(e)
-
-    if error:
-        return error, 500
+            raise
 
     new_tweets = update_tweets_file(username, local_filename, user_has_cached_tweets)
 
@@ -123,7 +122,41 @@ def update_tweets_file(username, filename, user_has_cached_tweets):
         for tweet in tweets:
             f.write(str(tweet.id) + '\n')
             f.write(str(tweet.created_at_in_seconds) + '\n')
-            # TODO: preprocess and tokenize text
-            f.write(tweet.full_text.replace('\n', ' ') + '\n')
+
+            preprocessed_tweet = preprocess_tweet(tweet.full_text)
+
+            if len(preprocessed_tweet):
+                for token in preprocessed_tweet:
+                    f.write('"' + token + '",')
+
+                f.write('\n')
+            else:
+                f.write(',\n')
 
     return len(tweets)
+
+
+def preprocess_tweet(tweet):
+    tokenizer = TweetTokenizer(preserve_case=False)
+    return [token for token in tokenizer.tokenize(tweet) if token_is_allowed(token)]
+
+
+def token_is_allowed(token):
+    regex_patterns = [
+        '^https?://',   # URL
+        u'^\u2019$',    # right single quotation
+        u'^\ufe0e$',    # variation selector 15
+        u'^\ufe0f$'     # variation selector 16
+    ]
+
+    if token in stopwords.words('english'):
+        return False
+    if token in emoji.UNICODE_EMOJI:
+        return False
+    if token in string.punctuation:
+        return False
+    for pattern in regex_patterns:
+        if re.search(pattern, token):
+            return False
+
+    return True

@@ -1,4 +1,6 @@
-Flask==1.0.2
 boto3==1.7.12
 botocore==1.10.12
+emoji==0.5.0
+Flask==1.0.2
+nltk==3.3
 python-twitter==3.4.1

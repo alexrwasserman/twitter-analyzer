@@ -4,4 +4,4 @@ Given a Twitter user, this will analyze their tweets and identify the various to
 Each tweet in tweets file will be of the format:
 * id
 * created at (seconds since epoch)
-* tokenized text
+* "token1","token2","token3",...
